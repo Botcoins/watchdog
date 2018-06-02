@@ -1,6 +1,9 @@
 use config::WatchdogCfg;
 use std::fs;
 use std::process::{Child, Command, ExitStatus};
+use std::sync::mpsc::Receiver;
+use std::thread;
+use std::time::Duration;
 
 pub struct WatchedChild {
 	cfg: WatchdogCfg,
@@ -16,10 +19,10 @@ impl WatchedChild {
 	fn spawn_impl(cfg: &WatchdogCfg) -> Result<Child, &'static str> {
 		if cfg.test_on_redeploy {
 			if 0 != Command::new("cargo")
-				.arg("build")
+				.arg("test")
 				.current_dir(&cfg.dir)
 				.spawn()
-				.expect("failed to build with cargo")
+				.expect("failed to test with cargo")
 				.wait()
 				.unwrap()
 				.code()
@@ -68,8 +71,15 @@ impl WatchedChild {
 		Ok(cmd.spawn().expect("failed to spawn child"))
 	}
 
-	pub fn bind<F>(mut self, shutdown: F) -> WatchdogCfg where F: FnOnce(ExitStatus, &WatchedChild) + 'static {
-		let status = self.child.wait().unwrap();
+	pub fn bind<F>(mut self, rx: Receiver<bool>, shutdown: F) -> WatchdogCfg where F: FnOnce(Option<ExitStatus>, &WatchedChild) + 'static {
+		let status = loop {
+			if let Ok(status) = self.child.try_wait() { break status; } else if rx.try_recv().is_ok() {
+				return self.cfg;
+			} else {
+				thread::sleep(Duration::from_secs(5));
+				continue;
+			}
+		};
 
 		(shutdown)(status, &self);
 
