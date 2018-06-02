@@ -18,6 +18,13 @@ impl WatchedChild {
 
 	fn spawn_impl(cfg: &WatchdogCfg, rebuild: bool) -> Result<Child, &'static str> {
 		if rebuild {
+			let _ = Command::new("git")
+				.arg("pull")
+				.current_dir(&cfg.dir)
+				.spawn()
+				.expect("failed to pull updates with git")
+				.wait();
+
 			if cfg.test_on_redeploy {
 				if 0 != Command::new("cargo")
 					.arg("test")
