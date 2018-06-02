@@ -4,3 +4,6 @@ version = "0.1.0"
 authors = ["ConcurrentMarxistGC <concurrentmarxistgc@users.noreply.github.com>"]
 
 [dependencies]
+toml="*"
+serde="*"
+serde_derive="*"
