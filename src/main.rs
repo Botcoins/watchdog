@@ -16,7 +16,7 @@ mod config;
 mod processes;
 
 fn main() {
-	let mut handles = start_children();
+	let mut handles = start_children(true);
 	let stdin = io::stdin();
 
 	loop {
@@ -29,6 +29,20 @@ fn main() {
 			"exit" => {
 				exit(0)
 			}
+			"rebuild" => {
+				let new_handles = start_children(true);
+
+				for handle in handles.lock().unwrap().iter() {
+					let _ = handle.send(true);
+				}
+
+				handles = new_handles;
+				for handle in handles.lock().unwrap().iter() {
+					let _ = handle.send(true);
+				}
+
+				println!("Reloaded configs and re-launched all child processes.")
+			}
 			"reload" => {
 				{
 					for handle in handles.lock().unwrap().iter() {
@@ -36,7 +50,7 @@ fn main() {
 					}
 				}
 
-				handles = start_children();
+				handles = start_children(false);
 
 				println!("Reloaded configs and re-launched all child processes.")
 			}
@@ -45,27 +59,23 @@ fn main() {
 	}
 }
 
-fn start_children() -> Arc<Mutex<Vec<Sender<bool>>>> {
+fn start_children(rebuild: bool) -> Arc<Mutex<Vec<Sender<bool>>>> {
 	let handles = Arc::new(Mutex::new(vec![]));
 
 	for cfg in scrape_watchdog_configs() {
 		let mut handles = Arc::clone(&handles);
 
 		let _ = thread::Builder::new().name(format!("{}", cfg.dir)).spawn(move || {
-			let mut cfg = cfg;
-			let mut rebuild = true;
-			loop {
-				cfg = if let Ok(wdc) = processes::WatchedChild::spawn(cfg, rebuild) {
-					rebuild = false;
+			if rebuild {
+				let _ = processes::WatchedChild::gen_exe(&cfg, true);
+			}
 
-					let (tx, rx) = mpsc::channel();
-					handles.lock().unwrap().push(tx);
+			if let Ok(mut wdc) = processes::WatchedChild::spawn(cfg.clone(), false) {
+				let (tx, rx) = mpsc::channel();
+				handles.lock().unwrap().push(tx);
 
-					wdc.bind(rx, |_, _| {})
-				} else { break; };
-
-				if !cfg.auto_restart {
-					break;
+				if cfg.auto_restart {
+					wdc.autorestart(rx);
 				}
 			}
 		}).expect("failed to spawn threads for children");

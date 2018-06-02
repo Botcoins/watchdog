@@ -1,22 +1,37 @@
 use config::WatchdogCfg;
 use std::fs;
-use std::process::{Child, Command, ExitStatus};
+use std::process::{Child, Command};
 use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
 
 pub struct WatchedChild {
 	cfg: WatchdogCfg,
+	exe_path: String,
 	child: Child,
 }
 
 impl WatchedChild {
 	pub fn spawn(cfg: WatchdogCfg, rebuild: bool) -> Result<WatchedChild, &'static str> {
-		let child = WatchedChild::spawn_impl(&cfg, rebuild)?;
-		Ok(WatchedChild { cfg, child })
+		let exe_path = WatchedChild::gen_exe(&cfg, rebuild)?;
+		let child = WatchedChild::spawn_child(&exe_path, &cfg);
+
+		Ok(WatchedChild { cfg, exe_path, child })
 	}
 
-	fn spawn_impl(cfg: &WatchdogCfg, rebuild: bool) -> Result<Child, &'static str> {
+	fn spawn_child(exe_path: &str, cfg: &WatchdogCfg) -> Child {
+		let mut cmd = Command::new(&exe_path);
+
+		for (k, v) in &cfg.env {
+			cmd.env(k, v);
+		}
+
+		cmd.current_dir(&cfg.dir);
+
+		cmd.spawn().expect("failed to spawn child")
+	}
+
+	pub fn gen_exe(cfg: &WatchdogCfg, rebuild: bool) -> Result<String, &'static str> {
 		if rebuild {
 			let _ = Command::new("git")
 				.arg("pull")
@@ -54,6 +69,8 @@ impl WatchedChild {
 			}
 		}
 
+		WatchedChild::cleanup(&cfg);
+
 		let origin = format!("{}/target/debug/{}", cfg.dir, cfg.dir);
 
 		let mut exe_path = String::new();
@@ -69,38 +86,25 @@ impl WatchedChild {
 			return Err("Failed to copy process");
 		}
 
-		let mut cmd = Command::new(&exe_path);
-
-		for (k, v) in &cfg.env {
-			cmd.env(k, v);
-		}
-
-		cmd.current_dir(&cfg.dir);
-
-		Ok(cmd.spawn().expect("failed to spawn child"))
+		Ok(exe_path)
 	}
 
-	pub fn bind<F>(mut self, rx: Receiver<bool>, shutdown: F) -> WatchdogCfg where F: FnOnce(Option<ExitStatus>, &WatchedChild) + 'static {
-		let status = loop {
+	pub fn autorestart(&mut self, rx: Receiver<bool>) {
+		loop {
 			if let Ok(status) = self.child.try_wait() { break status; } else if rx.try_recv().is_ok() {
-				return self.cfg;
+				self.child = WatchedChild::spawn_child(&self.exe_path, &self.cfg);
 			} else {
 				thread::sleep(Duration::from_secs(5));
 				continue;
 			}
 		};
-
-		(shutdown)(status, &self);
-
-		self.cleanup();
-		self.cfg
 	}
 
-	pub fn cleanup(&self) {
+	pub fn cleanup(cfg: &WatchdogCfg) {
 		if let Ok(read) = fs::read_dir("exe/") {
 			for entry in read {
 				if let Ok(entry) = entry {
-					if entry.file_name().to_str().unwrap().starts_with(&self.cfg.dir) {
+					if entry.file_name().to_str().unwrap().starts_with(&cfg.dir) {
 						let _ = fs::remove_file(entry.path());
 					}
 				}
