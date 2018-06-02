@@ -65,7 +65,7 @@ fn start_children(rebuild: bool) -> Arc<Mutex<Vec<Sender<bool>>>> {
 	for cfg in scrape_watchdog_configs() {
 		let mut handles = Arc::clone(&handles);
 
-		let _ = thread::Builder::new().name(format!("{}", cfg.dir)).spawn(move || {
+		let _ = thread::Builder::new().name(cfg.dir.clone()).spawn(move || {
 			if rebuild {
 				let _ = processes::WatchedChild::gen_exe(&cfg, true);
 			}
