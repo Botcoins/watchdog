@@ -53,8 +53,11 @@ fn start_children() -> Arc<Mutex<Vec<Sender<bool>>>> {
 
 		let _ = thread::Builder::new().name(format!("{}", cfg.dir)).spawn(move || {
 			let mut cfg = cfg;
+			let mut rebuild = true;
 			loop {
-				cfg = if let Ok(wdc) = processes::WatchedChild::spawn(cfg) {
+				cfg = if let Ok(wdc) = processes::WatchedChild::spawn(cfg, rebuild) {
+					rebuild = false;
+
 					let (tx, rx) = mpsc::channel();
 					handles.lock().unwrap().push(tx);
 

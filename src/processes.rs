@@ -11,38 +11,40 @@ pub struct WatchedChild {
 }
 
 impl WatchedChild {
-	pub fn spawn(cfg: WatchdogCfg) -> Result<WatchedChild, &'static str> {
-		let child = WatchedChild::spawn_impl(&cfg)?;
+	pub fn spawn(cfg: WatchdogCfg, rebuild: bool) -> Result<WatchedChild, &'static str> {
+		let child = WatchedChild::spawn_impl(&cfg, rebuild)?;
 		Ok(WatchedChild { cfg, child })
 	}
 
-	fn spawn_impl(cfg: &WatchdogCfg) -> Result<Child, &'static str> {
-		if cfg.test_on_redeploy {
-			if 0 != Command::new("cargo")
-				.arg("test")
+	fn spawn_impl(cfg: &WatchdogCfg, rebuild: bool) -> Result<Child, &'static str> {
+		if rebuild {
+			if cfg.test_on_redeploy {
+				if 0 != Command::new("cargo")
+					.arg("test")
+					.current_dir(&cfg.dir)
+					.spawn()
+					.expect("failed to test with cargo")
+					.wait()
+					.unwrap()
+					.code()
+					.unwrap_or(-1) {
+					return Err("Test for build failed...");
+				}
+			}
+
+			let exit_code = Command::new("cargo")
+				.arg("build")
 				.current_dir(&cfg.dir)
 				.spawn()
-				.expect("failed to test with cargo")
+				.expect("failed to build with cargo")
 				.wait()
 				.unwrap()
 				.code()
-				.unwrap_or(-1) {
-				return Err("Test for build failed...");
+				.unwrap_or(-1);
+
+			if exit_code == 0 {
+				return Err("Cannot build executable");
 			}
-		}
-
-		let exit_code = Command::new("cargo")
-			.arg("build")
-			.current_dir(&cfg.dir)
-			.spawn()
-			.expect("failed to build with cargo")
-			.wait()
-			.unwrap()
-			.code()
-			.unwrap_or(-1);
-
-		if exit_code == 0 {
-			return Err("Cannot build executable");
 		}
 
 		let origin = format!("{}/target/debug/{}", cfg.dir, cfg.dir);
