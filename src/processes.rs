@@ -14,6 +14,20 @@ impl WatchedChild {
 	}
 
 	fn spawn_impl(cfg: &WatchdogCfg) -> Result<Child, &'static str> {
+		if cfg.test_on_redeploy {
+			if 0 != Command::new("cargo")
+				.arg("build")
+				.current_dir(&cfg.dir)
+				.spawn()
+				.expect("failed to build with cargo")
+				.wait()
+				.unwrap()
+				.code()
+				.unwrap_or(-1) {
+				return Err("Test for build failed...");
+			}
+		}
+
 		let exit_code = Command::new("cargo")
 			.arg("build")
 			.current_dir(&cfg.dir)

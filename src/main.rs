@@ -18,6 +18,10 @@ fn main() {
 				cfg = if let Ok(wdc) = processes::WatchedChild::spawn(cfg) {
 					wdc.bind(|_, _| {})
 				} else { break; };
+
+				if !cfg.auto_restart {
+					break;
+				}
 			}
 		});
 	}
